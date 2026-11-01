@@ -254,6 +254,7 @@ func NewBgpServer(opt ...ServerOption) *BgpServer {
 		timingHook:   opts.timingHook,
 		shutdownWG:   &sync.WaitGroup{},
 	}
+	s.roaManager.onChange = s.revalidateRPKI
 	s.bmpManager = newBmpClientManager(s)
 	s.mrtManager = newMrtManager(s)
 	s.bfdServer = NewBfdServer(s, logger)
@@ -3507,6 +3508,20 @@ func (s *BgpServer) sReset(addr string, family bgp.Family) error {
 		return err
 	}
 	return s.softResetOut(addr, family, false)
+}
+
+// revalidateRPKI runs after a committed ROA change with shared.mu held for
+// writing. Use the internal reset paths to avoid queuing another management
+// operation while that lock is held, including after the last cache is removed.
+func (s *BgpServer) revalidateRPKI() {
+	for _, family := range []bgp.Family{bgp.RF_IPv4_UC, bgp.RF_IPv6_UC} {
+		if err := s.softResetIn("", family); err != nil {
+			s.logger.Error("failed to refresh RPKI import policy", slog.String("Family", family.String()), slog.Any("Error", err))
+		}
+		if err := s.softResetOut("", family, false); err != nil {
+			s.logger.Error("failed to refresh RPKI export policy", slog.String("Family", family.String()), slog.Any("Error", err))
+		}
+	}
 }
 
 func (s *BgpServer) validateTable(r *table.Table) (v map[*table.Path]*table.Validation) {

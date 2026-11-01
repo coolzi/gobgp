@@ -160,12 +160,13 @@ func TestROAManagerResetQueryReplacesROAs(t *testing.T) {
 }
 
 func TestROAManagerEndOfDataStopsLifetimeTimer(t *testing.T) {
-	// A canceled context keeps tryConnect from dialing.
+	// Port zero cannot accept a connection. Keep the context live so the
+	// lifetime callback can deliver its event, and cancel reconnects on exit.
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
 
 	rt := table.NewROATable(slog.Default())
-	serverKey := net.JoinHostPort("192.0.2.1", "323")
+	serverKey := net.JoinHostPort("127.0.0.1", "0")
 	eventCh := make(chan *roaEvent)
 	client := &roaClient{host: serverKey, eventCh: eventCh, lifetime: 1, ctx: ctx}
 	m := &roaManager{
@@ -186,7 +187,7 @@ func TestROAManagerEndOfDataStopsLifetimeTimer(t *testing.T) {
 		recv(rtr.NewRTREndOfData(1, serial))
 	}
 	disconnect := func() {
-		m.HandleROAEvent(&roaEvent{EventType: roaDisconnected, Src: serverKey})
+		m.HandleROAEvent(&roaEvent{EventType: roaDisconnected, Src: serverKey, owner: client})
 	}
 	records := func() uint32 {
 		r, _ := rt.Info(bgp.RF_IPv4_UC)
